@@ -25,22 +25,82 @@ import System.FilePath
 
 -- Accelerate library
 -- ------------------
+-- Included submodules in the accelerate repo
+included :: [String]
+included
+  = [
+      "accelerate-cuda",
+      "accelerate-io",
+      "accelerate-examples"
+    ]
+
+-- Additional libraries not included in the accelerate repo
+additional :: [(String, String)]
+additional
+  = [
+      ("accelerate-fft", "https://github.com/robeverest/accelerate-fft")
+    ]
+
+-- Dependencies of Accelerate-examples (in the order they need to be built)
+dependencies :: [String]
+dependencies
+  = [
+      "accelerate-cuda"
+    , "accelerate-io"
+    , "accelerate-fft"
+    ]
+
+updateSub :: String -> Build ()
+updateSub dir = inDir dir $ do
+  ssystem "git checkout master"
+  ssystem "git pull"
+
+fetchAdditional :: (String, String) -> Build ()
+fetchAdditional (name, remote) = do
+  ssystem $ "git clone " ++ remote ++ " " ++ name
+  outBlank
 
 fetchAcc :: Config -> Build ()
 fetchAcc cfg = do
   outLn "* Getting Accelerate"
-  ssystem $ "darcs get " ++ configDarcsRepo cfg ++ " accelerate"
+  ssystem $ "git clone " ++ configGitRepo cfg ++ " accelerate"
   io $ setCurrentDirectory "accelerate"
+  ssystem $ "git submodule init"
+  ssystem $ "git submodule update"
+
+  -- Get the latest version of all submodules
+  mapM_ updateSub included
+
+  mapM_ fetchAdditional additional
+
+  outBlank
+
+buildDependency :: String -> Build ()
+buildDependency name = inDir name $ do
+  ssystem $ unwords [ "cabal", "configure", "-fcuda", "--user"
+                    , "--package-db", "../dist/package.conf.inplace"
+                    , "--disable-library-profiling"
+                    ]
+  ssystem $ unwords [ "cabal", "build" ]
+  --RCE: Should really be using cabal-dev here I think
+  withTempFile $ \f -> do
+    ssystem $ unwords [ "cabal", "register", "--inplace", "--gen-pkg-config=" ++ f]
+    ssystem $ unwords [ "ghc-pkg", "register", f
+                      , "--package-db", "../dist/package.conf.inplace"
+                      ]
+
   outBlank
 
 buildAcc :: Config -> Build ()
 buildAcc cfg = do
   outLn "* Building Accelerate"
-  ssystem $ unwords [ "cabal", "configure", "-fcuda", "-fio", "-finplace"
+  ssystem $ unwords [ "cabal", "configure"
                     , "--disable-library-profiling"
                     , "--with-compiler=" ++ configWithGHC cfg ]
   ssystem $ unwords [ "cabal", "build" ]
   outBlank
+  outLn "* Building libraries"
+  mapM_ buildDependency dependencies
 
 
 -- The benchmark programs

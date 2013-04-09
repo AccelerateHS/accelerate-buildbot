@@ -14,7 +14,8 @@ module Main where
 import Util
 import Build
 import Config
-import BuildBox
+import BuildBox                    hiding ( changesN )
+import BuildBox.Command.Git
 
 import Data.List
 import Data.Maybe
@@ -71,7 +72,7 @@ modified :: Config -> Build Bool
 modified cfg =
   maybe' (configHistory cfg) (return True) $ \hist -> do
     buildT <- io $ read `fmap` readFile hist
-    patchT <- (darcsTimestamp . head) `fmap` changesN (Just $ configDarcsRepo cfg) 1
+    patchT <- (timestamp . head) `fmap` changesN (Just $ configGitRepo cfg) 1
     return (buildT /= patchT)
 
 

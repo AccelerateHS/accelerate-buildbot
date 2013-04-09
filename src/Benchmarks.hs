@@ -31,60 +31,86 @@ import qualified Data.ByteString.Lex.Double as B
 -- timing information from criterion (or similar) to the given file. It should
 -- also be linked with RTS options to query heap usage.
 --
--- Note that we require the criterion name for the benchmark to match that below
---
-benchmarks :: Config -> FilePath -> [Benchmark]
-benchmarks cfg summaryLog =
-  let simple name args = variants name [([],args)]
-      variants name    = map $ \(tag,args) ->
+benchmarks :: Config -> [FilePath -> Benchmark]
+benchmarks cfg =
+  let testcase name args = bench name "accelerate-examples" (name:"--cuda":args)
+      bench name exe args summaryLog =
        Benchmark
-        { benchmarkName    = name ++ bool ('-' : tag) [] (null tag)
+        { benchmarkName    = name
         , benchmarkSetup   = return ()
-        , benchmarkCommand = runAcc summaryLog ("accelerate-examples/dist/build" </> name </> name) args
+        , benchmarkCommand = runAcc summaryLog ("accelerate-examples/dist/build" </> exe </> exe) args
         , benchmarkCheck   = return [] }
       --
-      scratch = configScratchDir cfg
-      lena_bw = "accelerate-examples/data/images/lena_bw.pgm"
+      lena_bw = "accelerate-examples/data/images/lena512.pgm"
   in
-  concat
-    [ -- library primitives
-      variants "acc-map"     $ map (\x -> (x,[x])) ["abs", "plus", "square"]
-    , variants "acc-fold"    $ map (\x -> (x,[x])) ["sum", "product", "maximum", "minimum", "sum-d2", "product-2d"]
-    , variants "acc-stencil" $ map (\x -> (x,[x])) ["3x3"]
-
-      -- simple examples
-    , simple "acc-sasum"        []
-    , simple "acc-saxpy"        []
-    , simple "acc-dotp"         []
-    , simple "acc-filter"       []
-    , simple "acc-smvm"         ["accelerate-examples/data/matrices/random.mtx"]
-    , simple "acc-blackscholes" []
-    , simple "acc-radixsort"    []
-
-      -- block copy / IO
-    , simple "acc-io"           []
-
-      -- image processing
-    , simple "acc-canny"         [lena_bw, scratch </> "canny_out.pgm" ]
-    , simple "acc-integralimage" [lena_bw, scratch </> "integral_out.pgm" ]
+    [
+      -- We run all the accelerate-examples tests separately so we can get individual quirks.
+      testcase "map-abs" []
+    , testcase "map-plus" []
+    , testcase "map-square" []
+    , testcase "zip" []
+    , testcase "zipWith-plus" []
+    , testcase "fold-sum" []
+    , testcase "fold-product" []
+    , testcase "fold-maximum" []
+    , testcase "fold-minimum" []
+    , testcase "fold-2d-sum" []
+    , testcase "fold-2d-product" []
+    , testcase "fold-2d-maximum" []
+    , testcase "fold-2d-minimum" []
+    , testcase "foldseg-sum" []
+    , testcase "scanseg-sum" []
+    , testcase "stencil-1D" []
+    , testcase "stencil-2D" []
+    , testcase "stencil-3D" []
+    , testcase "stencil-3x3-cross" []
+    , testcase "stencil-3x3-pair" []
+    , testcase "stencil2-2D" []
+    , testcase "permute-hist" []
+    , testcase "backpermute-reverse" []
+    , testcase "backpermute-transpose" []
+    , testcase "init" []
+    , testcase "tail" []
+    , testcase "take" []
+    , testcase "drop" []
+    , testcase "slit" []
+    , testcase "gather" []
+    , testcase "gather-if" []
+    , testcase "scatter" []
+    , testcase "scatter-if" []
+    , testcase "sasum" []
+    , testcase "saxpy" []
+    , testcase "dotp" []
+    , testcase "filter" []
+    , testcase "smvm" ["-m", "accelerate-examples/data/matrices/random.mtx"]
+    , testcase "black-scholes" []
+    , testcase "radixsort" []
+    , testcase "io" []
+    , testcase "canny" ["-i", lena_bw]
+    , testcase "integral-image" ["-i", lena_bw]
+    , testcase "slices" []
+    , testcase "sharing-recovery" []
+    , testcase "bound-variables" []
+    , bench "crystal"    "accelerate-crystal"    ["--benchmark", "--cuda"]
+    , bench "fluid"      "accelerate-fluid"      ["--benchmark", "--cuda"]
+    , bench "mandelbrot" "accelerate-mandelbrot" ["--benchmark", "--cuda"]
+    , bench "nbody"      "accelerate-nbody"      ["--benchmark", "--cuda"]
+    , bench "smoothlife" "accelerate-smoothlife" ["--benchmark", "--cuda"]
     ]
 
 
 -- | Execute all benchmarks and return statistics for each.
 --
 runAccBenchmarks :: Config -> Build [BenchResult Stats]
-runAccBenchmarks config = withTempFile $ \f -> do
-  runs <- mapM run (benchmarks config f)
-  crit <- readCriterionStats f
-  return $ combineBenchStats runs crit
+runAccBenchmarks config = concat <$> mapM run (benchmarks config)
   where
-    run  x = statBenchResult
-           . BenchResult (benchmarkName x) . unit <$> runBenchmarkOnce 1 x
-
-    combineBenchStats = zipWith . liftBenchRunResult2 $ \b1 b2 ->
-      [BenchRunResult 0
-        (concatMap benchRunResultQuirks  b1 ++ concatMap benchRunResultQuirks  b2)
-        (concatMap benchRunResultAspects b1 ++ concatMap benchRunResultAspects b2) ]
+    run  x = withTempFile $ \f -> do
+      let x' = x f
+      r <- statBenchResult . BenchResult (benchmarkName x') . unit <$> runBenchmarkOnce 1 x'
+      c <- readCriterionStats f
+      case c of
+        [c'] -> return [r { benchResultRuns = benchResultRuns r ++ benchResultRuns c' }]
+        _    -> return $ r : c
 
 
 -- Read criterion statistics. The file contains the following header, which we
@@ -96,7 +122,7 @@ readCriterionStats :: FilePath -> Build [BenchResult Stats]
 readCriterionStats f = do
   contents <- io $ B.readFile f
   case parseCSV contents of
-    Nothing  -> throw  $ ErrorOther "failed to parse criterion results"
+    Nothing  -> if B.null contents then return [] else throw  $ ErrorOther "failed to parse criterion results"
     Just csv -> return $ map parse (tail csv)
 
   where

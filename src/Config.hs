@@ -14,6 +14,7 @@ module Config where
 import Args
 import Util
 import BuildBox
+import BuildBox.Command.Git
 
 import System.IO
 import System.FilePath
@@ -26,8 +27,8 @@ type SCPPath      = String
 
 data Config = Config
   {
+    configGitRepo        :: GitPath
     -- darcs source location and build directories
-    configDarcsRepo      :: DarcsPath                            -- something comprehensible to "darcs get"
   , configScratchDir     :: FilePath                             -- where to download and test the repo
 
     -- testing and comparison
@@ -77,7 +78,7 @@ processArgs st = do
   let state  = st { buildStateLogSystem = bool Nothing (Just stdout) verbose }
       config = Config
         {
-          configDarcsRepo      = accelerate_repo
+          configGitRepo        = "https://github.com/AccelerateHS/accelerate"
         , configScratchDir     = buildStateScratchDir st </> "accelerate-" ++ stamp
         , configHistory        = historyTo
         , configSchedule       = runAt

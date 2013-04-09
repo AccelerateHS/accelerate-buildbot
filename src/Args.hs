@@ -39,10 +39,10 @@ defaultArgs :: Args
 defaultArgs =  Args
   {
     accelerate_repo
-       = "http://code.haskell.org/accelerate"
+       = "https://github.com/AccelerateHS/accelerate"
       &= name "r"
       &= help "The Accelerate repository to test"
-      &= typ  "DARCS_PATH"
+      &= typ  "GIT_PATH"
 
   , with_ghc
        = "ghc"
